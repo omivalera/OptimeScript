@@ -1,4 +1,5 @@
 import tkinter as tk
+from tkinter import ttk
 import subprocess
 import os
 import sys
@@ -104,17 +105,30 @@ def check_system_status():
     print("\n=== VERIFICANDO ESTADO DEL SISTEMA ===")
     result = subprocess.run('powercfg /getactivescheme', shell=True, capture_output=True, text=True)
     print(f"[INFO] Plan de energía activo: {result.stdout}")
+    
     result = subprocess.run('wmic memorychip get speed', shell=True, capture_output=True, text=True)
     print(f"[INFO] Velocidad de la RAM: {result.stdout}")
+    if "2666" in result.stdout:
+        print("[RECOMENDACIÓN] La RAM está a 2666 MHz. Habilita XMP/DOCP en el BIOS para aumentar la velocidad (por ejemplo, a 3200 MHz) y mejorar el rendimiento de la Radeon Vega 8.")
+    
     try:
         result = subprocess.run('dxdiag /t dxdiag.txt', shell=True, capture_output=True, text=True)
-        with open('dxdiag.txt', 'r') as f:
-            for line in f:
-                if 'Dedicated Video Memory' in line or 'Shared System Memory' in line:
-                    print(f"[INFO] {line.strip()}")
-        os.remove('dxdiag.txt')
+        time.sleep(3)  # Aumentar retraso para asegurar que dxdiag genere el archivo
+        if os.path.exists('dxdiag.txt') and os.path.getsize('dxdiag.txt') > 0:
+            with open('dxdiag.txt', 'r', encoding='utf-16') as f:
+                found = False
+                for line in f:
+                    if 'Dedicated Video Memory' in line or 'Shared System Memory' in line:
+                        print(f"[INFO] {line.strip()}")
+                        found = True
+                if not found:
+                    print("[INFO] No se encontró información de VRAM en dxdiag.txt. Ejecuta 'dxdiag' manualmente, ve a la pestaña 'Pantalla' y revisa 'Memoria de video dedicada' y 'Memoria de sistema compartida'.")
+            os.remove('dxdiag.txt')
+        else:
+            print("[ERROR] No se pudo generar dxdiag.txt o el archivo está vacío. Ejecuta 'dxdiag' manualmente para verificar la VRAM.")
     except Exception as e:
-        print(f"[ERROR] No se pudo verificar la VRAM: {str(e)}")
+        print(f"[ERROR] No se pudo verificar la VRAM: {str(e)}. Ejecuta 'dxdiag' manualmente, ve a la pestaña 'Pantalla' y revisa 'Memoria de video dedicada' y 'Memoria de sistema compartida'.")
+    
     services = ['SysMain', 'WSearch', 'DiagTrack', 'wuauserv', 'XboxGipSvc', 'MapsBroker', 'DPS', 'WdiSystemHost', 'WpnService', 'DoSvc']
     for svc in services:
         if is_service_running(svc):
@@ -125,7 +139,6 @@ def check_system_status():
 
 def optimize():
     print("\n=== INICIANDO OPTIMIZACIÓN PARA GAMING ===")
-    # Verificar plan de energía
     result = subprocess.run('powercfg /getactivescheme', shell=True, capture_output=True, text=True)
     if "SCHEME_MIN" not in result.stdout:
         run_command('powercfg /setacvalueindex SCHEME_MIN 54533251-82be-4824-96c1-47b60b740d00 be337238-0d82-4146-a960-4f3749d470c7 1')
@@ -141,7 +154,6 @@ def optimize():
         stop_service_with_timeout(svc)
         configure_service(svc)
 
-    # Aplicar cambios en el registro solo si no están configurados
     if not check_registry_value("HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\GameDVR", "AppCaptureEnabled", 0):
         run_command('reg add "HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\GameDVR" /v AppCaptureEnabled /t REG_DWORD /d 0 /f')
     if not check_registry_value("HKCU\\System\\GameConfigStore", "GameDVR_Enabled", 0):
@@ -229,10 +241,25 @@ def build_gui():
     try:
         root = tk.Tk()
         root.title("Windows Gaming Optimizer - Ryzen 3 2200G")
-        root.geometry("400x300")
+        root.minsize(400, 400)
+        root.resizable(True, True)
 
-        output_text = tk.Text(root, height=10, width=40)
-        output_text.pack(pady=10)
+        text_frame = ttk.Frame(root)
+        text_frame.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
+
+        output_text = tk.Text(text_frame, height=10, width=50, wrap=tk.WORD)
+        scrollbar = ttk.Scrollbar(text_frame, orient=tk.VERTICAL, command=output_text.yview)
+        output_text.configure(yscrollcommand=scrollbar.set)
+        output_text.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+        scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
+
+        button_frame = ttk.Frame(root)
+        button_frame.pack(fill=tk.X, padx=10, pady=10)
+
+        tk.Button(button_frame, text="Optimizar para Gaming", command=optimize, height=2, width=25).pack(side=tk.TOP, pady=5)
+        tk.Button(button_frame, text="Verificar Estado", command=check_system_status, height=2, width=25).pack(side=tk.TOP, pady=5)
+        tk.Button(button_frame, text="Restaurar Configuración", command=restore, height=2, width=25).pack(side=tk.TOP, pady=5)
+        tk.Button(button_frame, text="Salir", command=root.destroy, height=1, width=15).pack(side=tk.TOP, pady=10)
 
         class StdoutRedirector:
             def __init__(self, text_widget):
@@ -247,11 +274,6 @@ def build_gui():
                 pass
 
         sys.stdout = StdoutRedirector(output_text)
-
-        tk.Button(root, text="Optimizar para Gaming", command=optimize, height=2, width=25).pack(pady=10)
-        tk.Button(root, text="Verificar Estado", command=check_system_status, height=2, width=25).pack(pady=10)
-        tk.Button(root, text="Restaurar Configuración", command=restore, height=2, width=25).pack(pady=10)
-        tk.Button(root, text="Salir", command=root.destroy, height=1, width=15).pack(pady=20)
 
         root.mainloop()
     except Exception as e:
